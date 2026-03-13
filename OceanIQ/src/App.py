@@ -3,14 +3,11 @@ import pandas as pd
 import datetime
 
 from embedder import get_model
-from search import local_search, confidence_label
+from search import local_search
 from rag import build_ai_summary, build_semantic_only_summary
 from endee_client import EndeeClient
 from research_sources import fetch_all_sources
 
-# ─────────────────────────────────────────────
-# PAGE CONFIG — must be first Streamlit call
-# ─────────────────────────────────────────────
 st.set_page_config(
     page_title="OceanIQ · Research Assistant",
     page_icon="🌊",
@@ -18,37 +15,40 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ─────────────────────────────────────────────
-# CSS
-# ─────────────────────────────────────────────
+SAMPLE_QUESTIONS = [
+    "What causes ocean acidification?",
+    "How do ARGO floats work?",
+    "Coral reef bleaching & climate",
+    "What is sea level rise?",
+    "Deep sea hydrothermal vents",
+]
+
+
 def inject_css():
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap');
 
-    /* ── ROOT TOKENS ── */
     :root {
-        --bg:       #07090f;
-        --surface:  #0d1220;
-        --surface2: #111827;
-        --surface3: #16202e;
-        --border:   #1c2a3e;
-        --border2:  #243347;
-        --accent:   #00d4ff;
-        --accent2:  #0099cc;
-        --accent3:  #005f80;
-        --text:     #dde5f0;
-        --muted:    #5a6e8a;
-        --muted2:   #8499b8;
-        --green:    #00c896;
-        --blue:     #3b9eff;
-        --yellow:   #f5a623;
-        --red:      #e05252;
-        --radius:   12px;
+        --bg:        #07090f;
+        --surface:   #0d1220;
+        --surface2:  #111827;
+        --border:    #1c2a3e;
+        --border2:   #243347;
+        --accent:    #00d4ff;
+        --accent2:   #0099cc;
+        --accent3:   #005f80;
+        --text:      #dde5f0;
+        --muted:     #5a6e8a;
+        --muted2:    #8499b8;
+        --green:     #00c896;
+        --blue:      #3b9eff;
+        --yellow:    #f5a623;
+        --red:       #e05252;
+        --radius:    12px;
         --radius-sm: 7px;
     }
 
-    /* ── BASE ── */
     html, body,
     [data-testid="stAppViewContainer"],
     [data-testid="stMain"] {
@@ -57,19 +57,17 @@ def inject_css():
         font-family: 'DM Sans', sans-serif;
     }
 
-    /* ── HIDE STREAMLIT CHROME ── */
     #MainMenu, footer, header,
     [data-testid="stToolbar"],
-    [data-testid="stDecoration"] { display: none !important; visibility: hidden !important; }
+    [data-testid="stDecoration"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
 
-    /* ── SCROLLBAR ── */
     ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
 
-    /* ════════════════════════════════
-       SIDEBAR  — full override
-    ════════════════════════════════ */
     [data-testid="stSidebar"] {
         background: var(--surface) !important;
         border-right: 1px solid var(--border) !important;
@@ -80,7 +78,6 @@ def inject_css():
         background: var(--surface) !important;
         padding: 1.5rem 1.25rem 2rem !important;
     }
-    /* collapse toggle button */
     [data-testid="stSidebarCollapsedControl"] button,
     button[data-testid="baseButton-headerNoPadding"] {
         background: var(--surface2) !important;
@@ -91,8 +88,6 @@ def inject_css():
         min-width: 0 !important;
         max-width: 0 !important;
     }
-
-    /* sidebar text / widgets */
     [data-testid="stSidebar"] label,
     [data-testid="stSidebar"] p,
     [data-testid="stSidebar"] span {
@@ -100,8 +95,6 @@ def inject_css():
         font-size: 13px !important;
     }
     [data-testid="stSidebar"] .stRadio > label { color: var(--text) !important; }
-
-    /* radio group */
     [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] {
         background: var(--surface2);
         border: 1px solid var(--border);
@@ -121,15 +114,11 @@ def inject_css():
         background: rgba(0,212,255,0.12);
         color: var(--accent) !important;
     }
-
-    /* checkboxes */
     [data-testid="stSidebar"] .stCheckbox label {
         color: var(--muted2) !important;
         font-size: 13px !important;
     }
     [data-testid="stSidebar"] .stCheckbox svg { color: var(--accent) !important; }
-
-    /* sidebar buttons */
     [data-testid="stSidebar"] .stButton > button {
         background: var(--surface2) !important;
         color: var(--muted2) !important;
@@ -147,8 +136,6 @@ def inject_css():
         color: var(--accent) !important;
         background: rgba(0,212,255,0.06) !important;
     }
-
-    /* download button */
     [data-testid="stSidebar"] [data-testid="stDownloadButton"] button {
         background: linear-gradient(135deg, rgba(0,212,255,0.12), rgba(0,153,204,0.08)) !important;
         color: var(--accent) !important;
@@ -158,12 +145,8 @@ def inject_css():
         width: 100%;
     }
 
-    /* ════════════════════════════════
-       MAIN AREA
-    ════════════════════════════════ */
     [data-testid="stMain"] > div { padding-top: 1.5rem !important; }
 
-    /* chat input */
     [data-testid="stChatInput"] {
         background: var(--surface2) !important;
         border: 1px solid var(--border2) !important;
@@ -180,11 +163,8 @@ def inject_css():
         border-color: var(--accent) !important;
         box-shadow: 0 0 0 2px rgba(0,212,255,0.12) !important;
     }
-    [data-testid="stChatInput"] button {
-        color: var(--accent) !important;
-    }
+    [data-testid="stChatInput"] button { color: var(--accent) !important; }
 
-    /* chat message bubbles */
     [data-testid="stChatMessage"] {
         background: transparent !important;
         border: none !important;
@@ -195,7 +175,6 @@ def inject_css():
         line-height: 1.7;
     }
 
-    /* expanders */
     [data-testid="stExpander"] {
         background: var(--surface2) !important;
         border: 1px solid var(--border) !important;
@@ -211,7 +190,6 @@ def inject_css():
     }
     [data-testid="stExpander"] summary:hover { color: var(--text) !important; }
 
-    /* warnings */
     [data-testid="stAlert"] {
         background: rgba(245,166,35,0.08) !important;
         border: 1px solid rgba(245,166,35,0.25) !important;
@@ -220,8 +198,6 @@ def inject_css():
         font-size: 13px !important;
     }
 
-    /* main buttons (sample chips) */
-    .main-area .stButton > button,
     [data-testid="stMain"] .stButton > button {
         background: var(--surface2) !important;
         color: var(--muted2) !important;
@@ -238,11 +214,6 @@ def inject_css():
         transform: translateY(-1px);
     }
 
-    /* ════════════════════════════════
-       CUSTOM COMPONENTS
-    ════════════════════════════════ */
-
-    /* Sidebar logo + meta */
     .sb-logo {
         font-family: 'Syne', sans-serif;
         font-size: 20px;
@@ -278,9 +249,8 @@ def inject_css():
         gap: 7px;
     }
     .sb-status.online  { background: rgba(0,200,150,0.08); color: var(--green); border: 1px solid rgba(0,200,150,0.2); }
-    .sb-status.offline { background: rgba(224,82,82,0.08);  color: var(--red);   border: 1px solid rgba(224,82,82,0.2); }
+    .sb-status.offline { background: rgba(224,82,82,0.08); color: var(--red);   border: 1px solid rgba(224,82,82,0.2); }
 
-    /* Result cards */
     .r-card {
         background: var(--surface2);
         border: 1px solid var(--border);
@@ -306,7 +276,6 @@ def inject_css():
     }
     .r-meta { font-size: 11.5px; color: var(--muted); margin-bottom: 7px; }
 
-    /* Badges */
     .badge {
         display: inline-block;
         font-size: 10.5px;
@@ -322,7 +291,6 @@ def inject_css():
     .b-red    { background: rgba(224,82,82,0.12);  color: var(--red); }
     .b-cyan   { background: rgba(0,212,255,0.10);  color: var(--accent); }
 
-    /* AI answer box */
     .ai-box {
         background: linear-gradient(135deg, rgba(0,212,255,0.05), rgba(0,99,128,0.04));
         border: 1px solid rgba(0,212,255,0.18);
@@ -344,7 +312,6 @@ def inject_css():
         opacity: 0.85;
     }
 
-    /* Source link pill */
     .src-link {
         display: inline-block;
         font-size: 11.5px;
@@ -357,7 +324,6 @@ def inject_css():
     }
     .src-link:hover { background: rgba(0,212,255,0.1); }
 
-    /* Hero */
     .hero {
         text-align: center;
         padding: 64px 20px 44px;
@@ -402,17 +368,6 @@ def inject_css():
     """, unsafe_allow_html=True)
 
 
-# ─────────────────────────────────────────────
-# SESSION STATE
-# ─────────────────────────────────────────────
-SAMPLE_QUESTIONS = [
-    "What causes ocean acidification?",
-    "How do ARGO floats work?",
-    "Coral reef bleaching & climate",
-    "What is sea level rise?",
-    "Deep sea hydrothermal vents",
-]
-
 def init_state():
     defaults = {
         "messages":        [],
@@ -429,15 +384,11 @@ def init_state():
             st.session_state[k] = v
 
 
-# ─────────────────────────────────────────────
-# SIDEBAR  (called early, before chat logic)
-# ─────────────────────────────────────────────
 def render_sidebar():
     with st.sidebar:
         st.markdown('<div class="sb-logo">🌊 OceanIQ</div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-tag">Ocean Research Discovery Platform</div>', unsafe_allow_html=True)
 
-        # ── Search mode ──
         st.markdown('<div class="sb-section">Search Mode</div>', unsafe_allow_html=True)
         mode_idx = 0 if st.session_state.mode == "🔍 Semantic Search" else 1
         st.session_state.mode = st.radio(
@@ -447,14 +398,12 @@ def render_sidebar():
             label_visibility="collapsed",
         )
 
-        # ── Web sources ──
         st.markdown('<div class="sb-section">Web Sources</div>', unsafe_allow_html=True)
         st.session_state.sources_wiki    = st.checkbox("🌐 Wikipedia",        value=st.session_state.sources_wiki,    key="cb_wiki")
         st.session_state.sources_scholar = st.checkbox("📄 Semantic Scholar", value=st.session_state.sources_scholar, key="cb_scholar")
         st.session_state.sources_pubmed  = st.checkbox("🧬 PubMed Journals",  value=st.session_state.sources_pubmed,  key="cb_pubmed")
         st.session_state.sources_patents = st.checkbox("💡 Google Patents",    value=st.session_state.sources_patents, key="cb_patents")
 
-        # ── Endee status ──
         st.markdown('<div class="sb-section">Vector Index</div>', unsafe_allow_html=True)
         try:
             EndeeClient()
@@ -462,7 +411,6 @@ def render_sidebar():
         except Exception:
             st.markdown('<div class="sb-status offline">🔴 Endee offline</div>', unsafe_allow_html=True)
 
-        # ── Recent searches ──
         st.markdown('<div class="sb-section">Recent Searches</div>', unsafe_allow_html=True)
         history = st.session_state.search_history[-8:][::-1]
         if not history:
@@ -477,7 +425,6 @@ def render_sidebar():
                 st.session_state.search_history = []
                 st.rerun()
 
-        # ── Export ──
         if st.session_state.last_results:
             st.markdown('<div class="sb-section">Export</div>', unsafe_allow_html=True)
             rows = [
@@ -500,14 +447,16 @@ def render_sidebar():
             )
 
 
-# ─────────────────────────────────────────────
-# BADGE + CARD HELPERS
-# ─────────────────────────────────────────────
 def _badge(score: float) -> str:
-    if score >= 0.75:   return f'<span class="badge b-green">Strong {score:.2f}</span>'
-    elif score >= 0.60: return f'<span class="badge b-blue">Good {score:.2f}</span>'
-    elif score >= 0.45: return f'<span class="badge b-yellow">Weak {score:.2f}</span>'
-    else:               return f'<span class="badge b-red">Low {score:.2f}</span>'
+    if score >= 0.75:
+        return f'<span class="badge b-green">Strong {score:.2f}</span>'
+    elif score >= 0.60:
+        return f'<span class="badge b-blue">Good {score:.2f}</span>'
+    elif score >= 0.45:
+        return f'<span class="badge b-yellow">Weak {score:.2f}</span>'
+    else:
+        return f'<span class="badge b-red">Low {score:.2f}</span>'
+
 
 def render_local_card(r, idx):
     meta  = r.get("meta", {})
@@ -518,9 +467,10 @@ def render_local_card(r, idx):
         <div class="r-title">{idx}. {meta.get('title', 'Unknown')}</div>
         <div class="r-text">{meta.get('text', '')[:260]}…</div>
         {_badge(sim)}
-        {'<span class="badge b-cyan">🏷 '+topic+'</span>' if topic else ''}
-        <span class="badge b-blue">📄 {meta.get('source','Local Index')}</span>
+        {'<span class="badge b-cyan">🏷 ' + topic + '</span>' if topic else ''}
+        <span class="badge b-blue">📄 {meta.get('source', 'Local Index')}</span>
     </div>""", unsafe_allow_html=True)
+
 
 def render_web_card(item, source_type, idx):
     title   = item.get("title", "Untitled")
@@ -528,10 +478,16 @@ def render_web_card(item, source_type, idx):
     snippet = (item.get("summary") or item.get("abstract") or "")[:230]
     authors = item.get("authors", "")
     year    = item.get("year", "")
-    meta_line = (f'<div class="r-meta">{authors}'
-                 f'{"&nbsp;·&nbsp;" + str(year) if year else ""}</div>') if authors else ""
-    link_html = (f'<a class="src-link" href="{url}" target="_blank">'
-                 f'↗ Open on {source_type}</a>') if url else ""
+
+    meta_line = (
+        f'<div class="r-meta">{authors}'
+        f'{"&nbsp;·&nbsp;" + str(year) if year else ""}</div>'
+    ) if authors else ""
+
+    link_html = (
+        f'<a class="src-link" href="{url}" target="_blank">↗ Open on {source_type}</a>'
+    ) if url else ""
+
     st.markdown(f"""
     <div class="r-card">
         <div class="r-title">{idx}. {title}</div>
@@ -541,9 +497,6 @@ def render_web_card(item, source_type, idx):
     </div>""", unsafe_allow_html=True)
 
 
-# ─────────────────────────────────────────────
-# RENDER ASSISTANT MESSAGE FROM SESSION STATE
-# ─────────────────────────────────────────────
 def render_assistant(data: dict):
     mode          = data.get("mode", "🔍 Semantic Search")
     answer        = data.get("answer", "")
@@ -595,53 +548,44 @@ def render_assistant(data: dict):
             )
 
 
-# ─────────────────────────────────────────────
-# SEARCH LOGIC
-# ─────────────────────────────────────────────
 def _do_search(query: str):
     query = query.strip()
     if not query:
         return
 
-    # Prevent duplicate consecutive entries
     if (st.session_state.messages
             and st.session_state.messages[-1].get("role") == "user"
             and st.session_state.messages[-1].get("content") == query):
         return
 
-    # ── Embed query ──
     get_model()
 
-    # ── Local vector search ──
     local_results = local_search(query, k=5)
     st.session_state.last_results = local_results
 
-    # ── Web sources ──
     source_flags = {
         "wikipedia":        st.session_state.sources_wiki,
         "semantic_scholar": st.session_state.sources_scholar,
         "pubmed":           st.session_state.sources_pubmed,
         "patents":          st.session_state.sources_patents,
     }
+
     try:
         web_results = fetch_all_sources(query, source_flags)
     except Exception:
         web_results = {}
 
-    # ── Build answer ──
     mode = st.session_state.mode
     if "🤖" in mode:
         answer = build_ai_summary(query, local_results, web_results)
     else:
         answer = build_semantic_only_summary(query, local_results)
 
-    # ── Confidence check ──
     top_sim = local_results[0].get("similarity", 0) if local_results else 0
     low_confidence = top_sim < 0.35 and not any(
         v for v in web_results.values() if isinstance(v, list) and v
     )
 
-    # ── Store in session state ──
     st.session_state.messages.append({"role": "user", "content": query})
     st.session_state.messages.append({
         "role": "assistant",
@@ -659,17 +603,11 @@ def _do_search(query: str):
         st.session_state.search_history.append(query)
 
 
-# ─────────────────────────────────────────────
-# MAIN
-# ─────────────────────────────────────────────
 def main():
     inject_css()
     init_state()
-
-    # Sidebar renders first — crucial for Streamlit to register it
     render_sidebar()
 
-    # ── Welcome screen (no messages yet) ──
     if not st.session_state.messages:
         st.markdown("""
         <div class="hero">
@@ -694,8 +632,6 @@ def main():
                 if st.button(q, key=f"chip_{i}", use_container_width=True):
                     _do_search(q)
                     st.rerun()
-
-    # ── Chat history ──
     else:
         for msg in st.session_state.messages:
             if msg["role"] == "user":
@@ -712,7 +648,6 @@ def main():
                         _do_search(q)
                         st.rerun()
 
-    # ── Chat input — ALWAYS last in main() ──
     user_input = st.chat_input("Ask about oceans, marine science, climate…")
     if user_input:
         _do_search(user_input)
