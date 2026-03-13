@@ -1,25 +1,16 @@
-"""
-rag.py — OceanIQ answer generation
-  🤖 AI Summary  → phi3:mini via Ollama (best quality for 8GB RAM)
-  🔍 Semantic    → Extractive summary (no LLM)
-"""
-
 import requests
 import json
 
 OLLAMA_URL   = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "phi3:mini"   # 2.3GB — best Q&A quality for 8GB RAM
+OLLAMA_MODEL = "llama3.2:1b"
 
 
-# ─────────────────────────────────────────────
-# DIAGNOSTICS
-# ─────────────────────────────────────────────
 def _ollama_status() -> dict:
     try:
         r = requests.get("http://localhost:11434/api/tags", timeout=4)
         r.raise_for_status()
         models = [m["name"] for m in r.json().get("models", [])]
-        has_model = any("phi3" in m.lower() for m in models)
+        has_model = any("llama3.2" in m.lower() for m in models)
         return {"running": True, "has_model": has_model, "models": models, "error": None}
     except requests.exceptions.ConnectionError:
         return {"running": False, "has_model": False, "models": [], "error": "connection_refused"}
@@ -27,18 +18,11 @@ def _ollama_status() -> dict:
         return {"running": False, "has_model": False, "models": [], "error": str(e)}
 
 
-# ─────────────────────────────────────────────
-# CONTEXT BUILDER
-# ─────────────────────────────────────────────
 def _build_context(local_results: list, web_results: dict) -> str:
-    """
-    phi3:mini has a 4096 token window — we can give it richer context than TinyLlama.
-    Budget ~1200 chars for context so there's room for a solid answer.
-    """
     parts = []
 
     for r in local_results[:3]:
-        text = (r.get("meta") or {}).get("text", "").strip()
+        text  = (r.get("meta") or {}).get("text", "").strip()
         title = (r.get("meta") or {}).get("title", "")
         if text:
             sentences = [s.strip() for s in text.split(".") if len(s.strip()) > 20]
@@ -47,7 +31,7 @@ def _build_context(local_results: list, web_results: dict) -> str:
 
     for item in (web_results.get("wikipedia") or [])[:2]:
         snippet = (item.get("summary") or item.get("abstract") or "").strip()
-        title = item.get("title", "")
+        title   = item.get("title", "")
         if snippet:
             sentences = [s.strip() for s in snippet.split(".") if len(s.strip()) > 20]
             chunk = ". ".join(sentences[:3]) + "."
@@ -55,7 +39,7 @@ def _build_context(local_results: list, web_results: dict) -> str:
 
     for item in (web_results.get("semantic_scholar") or [])[:2]:
         snippet = (item.get("abstract") or item.get("summary") or "").strip()
-        title = item.get("title", "")
+        title   = item.get("title", "")
         if snippet:
             sentences = [s.strip() for s in snippet.split(".") if len(s.strip()) > 20]
             chunk = ". ".join(sentences[:2]) + "."
@@ -63,33 +47,27 @@ def _build_context(local_results: list, web_results: dict) -> str:
 
     for item in (web_results.get("pubmed") or [])[:1]:
         snippet = (item.get("abstract") or item.get("summary") or "").strip()
-        title = item.get("title", "")
+        title   = item.get("title", "")
         if snippet:
             sentences = [s.strip() for s in snippet.split(".") if len(s.strip()) > 20]
             chunk = ". ".join(sentences[:2]) + "."
             parts.append(f"• {title}: {chunk}" if title else f"• {chunk}")
 
-    context = "\n".join(parts)
-    return context[:1200]
+    return "\n".join(parts)[:1200]
 
 
-# ─────────────────────────────────────────────
-# PHI3 CALL  (streaming for reliability on CPU)
-# ─────────────────────────────────────────────
-def _call_phi3(context: str, query: str) -> tuple:
-    """
-    phi3:mini uses a simple <|user|> / <|end|> / <|assistant|> format.
-    stream=True reads token by token — reliable on CPU.
-    """
+def _call_llama(context: str, query: str) -> tuple:
     prompt = (
-        "<|user|>\n"
-        "You are an expert ocean science research assistant. "
-        "Using ONLY the context below, write a clear and informative answer (3-5 sentences). "
-        "Do not make up facts. If the context doesn't fully answer the question, say so.\n\n"
+        "<|start_header_id|>system<|end_header_id|>\n"
+        "You are a concise ocean science research assistant. "
+        "Answer the question using ONLY the provided context. "
+        "Write 3-4 clear sentences. Do not make up facts.\n"
+        "<|eot_id|>\n"
+        "<|start_header_id|>user<|end_header_id|>\n"
         f"Context:\n{context}\n\n"
         f"Question: {query}\n"
-        "<|end|>\n"
-        "<|assistant|>\n"
+        "<|eot_id|>\n"
+        "<|start_header_id|>assistant<|end_header_id|>\n"
     )
 
     payload = {
@@ -102,7 +80,7 @@ def _call_phi3(context: str, query: str) -> tuple:
             "top_p":          0.9,
             "top_k":          40,
             "repeat_penalty": 1.1,
-            "stop": ["<|end|>", "<|user|>", "<|system|>"],
+            "stop": ["<|eot_id|>", "<|start_header_id|>"],
         },
     }
 
@@ -124,8 +102,7 @@ def _call_phi3(context: str, query: str) -> tuple:
 
         answer = "".join(tokens).strip()
 
-        # Clean leaked prompt tokens
-        for tag in ["<|assistant|>", "<|user|>", "<|end|>", "<|system|>"]:
+        for tag in ["<|eot_id|>", "<|start_header_id|>", "<|end_header_id|>"]:
             answer = answer.replace(tag, "").strip()
 
         return (answer, None) if len(answer) > 20 else (None, f"Short response: '{answer}'")
@@ -138,9 +115,6 @@ def _call_phi3(context: str, query: str) -> tuple:
         return None, str(e)
 
 
-# ─────────────────────────────────────────────
-# EXTRACTIVE FALLBACK
-# ─────────────────────────────────────────────
 def _extractive_summary(local_results: list, web_results: dict) -> str:
     sentences = []
 
@@ -169,24 +143,20 @@ def _extractive_summary(local_results: list, web_results: dict) -> str:
 
 
 def _error_html(title: str, detail: str, fallback: str) -> str:
-    return (
+    html = (
         f"<div style='background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.3);"
         f"border-radius:8px;padding:12px 14px;margin-bottom:12px;font-size:13px;'>"
         f"<span style='color:#f5a623;font-weight:700;'>⚠️ {title}</span><br>"
         f"<span style='color:#8499b8;'>{detail}</span>"
         f"</div>"
-        + (f"<i style='color:#5a6e8a;font-size:12px;'>Showing extracted summary instead:</i>"
-           f"<br><br>{fallback}" if fallback else "")
     )
+    if fallback:
+        html += f"<i style='color:#5a6e8a;font-size:12px;'>Showing extracted summary instead:</i><br><br>{fallback}"
+    return html
 
 
-# ─────────────────────────────────────────────
-# PUBLIC API
-# ─────────────────────────────────────────────
 def build_ai_summary(query: str, local_results: list, web_results: dict) -> str:
-    """🤖 AI Summary — phi3:mini answers using retrieved context."""
-
-    context = _build_context(local_results, web_results)
+    context  = _build_context(local_results, web_results)
     fallback = _extractive_summary(local_results, web_results)
 
     if not context:
@@ -195,12 +165,11 @@ def build_ai_summary(query: str, local_results: list, web_results: dict) -> str:
             "Try different keywords or make sure Endee has indexed data."
         )
 
-    answer, error = _call_phi3(context, query)
+    answer, error = _call_llama(context, query)
 
     if answer:
         return answer
 
-    # Diagnose
     if error == "connection_refused":
         return _error_html(
             "Ollama is not running",
@@ -210,8 +179,8 @@ def build_ai_summary(query: str, local_results: list, web_results: dict) -> str:
 
     if error == "timeout":
         return _error_html(
-            "phi3:mini timed out",
-            "It may still be loading into RAM. Wait 30 seconds and try again.",
+            "llama3.2:1b timed out",
+            "Try again — first load takes a few seconds as the model loads into RAM.",
             fallback,
         )
 
@@ -219,20 +188,18 @@ def build_ai_summary(query: str, local_results: list, web_results: dict) -> str:
     if status["running"] and not status["has_model"]:
         installed = ", ".join(status["models"]) or "none"
         return _error_html(
-            "phi3:mini is not installed",
-            f"Run: <code>ollama pull phi3:mini</code> &nbsp;|&nbsp; "
-            f"Installed: {installed}",
+            "llama3.2:1b is not installed",
+            f"Run: <code>ollama pull llama3.2:1b</code> &nbsp;|&nbsp; Installed: {installed}",
             fallback,
         )
 
     if error:
-        return _error_html("phi3:mini error", str(error), fallback)
+        return _error_html("LLM error", str(error), fallback)
 
     return fallback if fallback else "Could not generate an answer. Try rephrasing."
 
 
 def build_semantic_only_summary(query: str, local_results: list) -> str:
-    """🔍 Semantic Search — extractive summary, no LLM."""
     if not local_results:
         return f"No matching documents found for <b>{query}</b>. Try different keywords."
 
