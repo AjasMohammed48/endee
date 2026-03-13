@@ -1,3 +1,10 @@
+## 🌊 OceanIQ — Ocean Science Research Assistant
+
+> My project submission is in the [`OceanIQ/`](./OceanIQ) folder.
+> 👉 [Click here to view the project README](./OceanIQ/README.md)
+
+---
+
 <p align="center">
   <picture>
       <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
