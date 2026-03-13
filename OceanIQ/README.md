@@ -195,8 +195,13 @@ OceanIQ/
 
 > OceanIQ running with Semantic Search and AI Summary modes
 
-![OceanIQ UI](https://i.imgur.com/placeholder.png)
+## 📸 Screenshots
 
+### 🔍 Semantic Search Mode
+![Semantic Search](https://raw.githubusercontent.com/AjasMohammed48/endee/master/OceanIQ/assets/Screenshot%202026-03-14%20025908.png)
+
+### 🤖 AI Summary Mode
+![AI Summary](https://raw.githubusercontent.com/AjasMohammed48/endee/master/OceanIQ/assets/Screenshot%202026-03-14%20033829.png)
 ---
 
 ## 👤 Author
