@@ -1,7 +1,12 @@
+import re
 import requests
 
-HEADERS = {"User-Agent": "OceanIQ/1.0 (ocean science research tool)"}
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; OceanIQ/1.0)"}
 TIMEOUT = 8
+
+
+def _strip_html(text: str) -> str:
+    return re.sub(r"<[^>]+>", "", text).strip()
 
 
 def fetch_wikipedia(query: str, limit: int = 3) -> list:
@@ -35,12 +40,12 @@ def fetch_wikipedia(query: str, limit: int = 3) -> list:
                 )
                 sr.raise_for_status()
                 data    = sr.json()
-                summary = data.get("extract", "")
+                summary = _strip_html(data.get("extract", ""))
                 url     = data.get("content_urls", {}).get("desktop", {}).get("page", "")
                 if not url:
                     url = f"https://en.wikipedia.org/wiki/{slug}"
             except Exception:
-                summary = page.get("snippet", "").replace('<span class="searchmatch">', "").replace("</span>", "")
+                summary = _strip_html(page.get("snippet", ""))
                 url     = f"https://en.wikipedia.org/wiki/{slug}"
 
             if title and summary:
@@ -78,7 +83,7 @@ def fetch_semantic_scholar(query: str, limit: int = 3) -> list:
             link    = p.get("url") or (f"https://doi.org/{doi}" if doi else "")
             results.append({
                 "title":    p.get("title", ""),
-                "abstract": (p.get("abstract") or "")[:400],
+                "abstract": _strip_html((p.get("abstract") or "")[:400]),
                 "authors":  authors,
                 "year":     p.get("year", ""),
                 "url":      link,
@@ -129,8 +134,8 @@ def fetch_pubmed(query: str, limit: int = 3) -> list:
             title = doc.get("title", "")
             if title:
                 results.append({
-                    "title":    title,
-                    "abstract": doc.get("source", ""),
+                    "title":    _strip_html(title),
+                    "abstract": _strip_html(doc.get("source", "")),
                     "authors":  ", ".join(a.get("name", "") for a in (doc.get("authors") or [])[:3]),
                     "year":     (doc.get("pubdate") or "")[:4],
                     "url":      f"https://pubmed.ncbi.nlm.nih.gov/{pid}/",
