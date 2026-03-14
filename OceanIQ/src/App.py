@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 import pandas as pd
 import datetime
@@ -462,10 +463,10 @@ def render_local_card(r, idx):
     meta  = r.get("meta", {})
     sim   = r.get("similarity", 0)
     topic = meta.get("topic", "")
-    st.markdown(f"""
-    <div class="r-card">
+    text  = re.sub(r"<[^>]+>", "", meta.get("text", "")[:260])
+    st.markdown(f"""<div class="r-card">
         <div class="r-title">{idx}. {meta.get('title', 'Unknown')}</div>
-        <div class="r-text">{meta.get('text', '')[:260]}…</div>
+        <div class="r-text">{text}...</div>
         {_badge(sim)}
         {'<span class="badge b-cyan">🏷 ' + topic + '</span>' if topic else ''}
         <span class="badge b-blue">📄 {meta.get('source', 'Local Index')}</span>
@@ -473,28 +474,24 @@ def render_local_card(r, idx):
 
 
 def render_web_card(item, source_type, idx):
-    title   = item.get("title", "Untitled")
+    title   = re.sub(r"<[^>]+>", "", item.get("title", "Untitled"))
     url     = item.get("url") or item.get("link") or ""
-    snippet = (item.get("summary") or item.get("abstract") or "")[:230]
+    raw     = item.get("summary") or item.get("abstract") or ""
+    snippet = re.sub(r"<[^>]+>", "", raw)[:230]
     authors = item.get("authors", "")
     year    = item.get("year", "")
+    meta    = f"{authors} · {year}" if authors and year else authors or ""
 
-    meta_line = (
-        f'<div class="r-meta">{authors}'
-        f'{"&nbsp;·&nbsp;" + str(year) if year else ""}</div>'
-    ) if authors else ""
-
-    link_html = (
-        f'<a class="src-link" href="{url}" target="_blank">↗ Open on {source_type}</a>'
-    ) if url else ""
-
-    st.markdown(f"""
-    <div class="r-card">
-        <div class="r-title">{idx}. {title}</div>
-        {meta_line}
-        <div class="r-text">{snippet}…</div>
-        {link_html}
-    </div>""", unsafe_allow_html=True)
+    st.markdown(f"**{idx}. {title}**")
+    if meta:
+        st.caption(meta)
+    st.write(snippet + "...")
+    if url:
+        st.markdown(
+            f'<a class="src-link" href="{url}" target="_blank">↗ Open on {source_type}</a>',
+            unsafe_allow_html=True,
+        )
+    st.divider()
 
 
 def render_assistant(data: dict):
@@ -510,8 +507,7 @@ def render_assistant(data: dict):
             st.warning("⚠️ Low confidence in results — try rephrasing your query.")
         else:
             label = "🤖 AI Summary" if "🤖" in mode else "🔍 Semantic Answer"
-            st.markdown(f"""
-            <div class="ai-box">
+            st.markdown(f"""<div class="ai-box">
                 <div class="ai-label">{label}</div>
                 {answer}
             </div>""", unsafe_allow_html=True)
@@ -609,8 +605,7 @@ def main():
     render_sidebar()
 
     if not st.session_state.messages:
-        st.markdown("""
-        <div class="hero">
+        st.markdown("""<div class="hero">
             <div class="hero-title">OceanIQ Research<br>Assistant</div>
             <div class="hero-sub">
                 Discover papers, Wikipedia articles, journals &amp; patents
@@ -622,8 +617,7 @@ def main():
                 <span class="hero-pill">🌐 Live Web Sources</span>
                 <span class="hero-pill">🧬 PubMed · Scholar</span>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
 
         st.markdown("##### Try a sample question")
         cols = st.columns(len(SAMPLE_QUESTIONS))
